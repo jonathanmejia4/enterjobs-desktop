@@ -1,0 +1,86 @@
+# EnterJobs desktop — build on the PUBLIC repo's FREE runners. Source lives in the private
+# SAF_FileSystem repo (checked out via the SRC_PAT read token); installers publish to THIS repo's
+# releases via the built-in GITHUB_TOKEN (same-repo → no extra publish token, no billing quota).
+name: Build EnterJobs
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to this repo's Releases"
+        type: boolean
+        default: true
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+defaults:
+  run:
+    shell: bash
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: jonathanmejia4/SAF_FileSystem
+          token: ${{ secrets.SRC_PAT }}
+          ref: main
+          path: src
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Freeze the runtime sidecar (PyInstaller)
+        working-directory: src/enterjobs-runtime
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          pip install claude-agent-sdk anyio fastmcp patchright browserforge httpx pyyaml
+          pip install -r requirements-osint.txt || echo "osint deps partial — non-fatal"
+          pyinstaller --noconfirm enterjobs-runtime.spec
+          BIN="dist/enterjobs-runtime/enterjobs-runtime"
+          [ "${{ matrix.os }}" = "windows-latest" ] && BIN="dist/enterjobs-runtime/enterjobs-runtime.exe"
+          "$BIN" auth status
+      - name: Install desktop deps
+        working-directory: src/enterjobs-desktop
+        run: npm install
+      - name: Decide publish
+        id: m
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then
+            echo "flag=--publish always" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=--publish never" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build Windows (nsis, unsigned)
+        if: matrix.os == 'windows-latest'
+        working-directory: src/enterjobs-desktop
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: npx electron-builder --win ${{ steps.m.outputs.flag }}
+      - name: Build Linux (AppImage + deb)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: src/enterjobs-desktop
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: npx electron-builder --linux ${{ steps.m.outputs.flag }}
+      - name: Build macOS (dmg + zip, unsigned)
+        if: matrix.os == 'macos-latest'
+        working-directory: src/enterjobs-desktop
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}", CSC_IDENTITY_AUTO_DISCOVERY: "false" }
+        run: npx electron-builder --mac ${{ steps.m.outputs.flag }}
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ej-${{ matrix.os }}
+          path: |
+            src/enterjobs-desktop/dist/*.exe
+            src/enterjobs-desktop/dist/*.AppImage
+            src/enterjobs-desktop/dist/*.deb
+            src/enterjobs-desktop/dist/*.dmg
+            src/enterjobs-desktop/dist/*.zip
+            src/enterjobs-desktop/dist/*.yml
