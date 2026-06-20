@@ -1,5 +1,5 @@
 # EnterJobs desktop — build on the PUBLIC repo's FREE runners. Source lives in the private
-# SAF_FileSystem repo (checked out via the SRC_PAT read token); installers publish to THIS repo's
+# SAF_FileSystem repo (cloned via the SRC_PAT read token); installers publish to THIS repo's
 # releases via the built-in GITHUB_TOKEN (same-repo → no extra publish token, no billing quota).
 name: Build EnterJobs
 on:
@@ -25,20 +25,22 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
-      - name: Checkout private source
-        uses: actions/checkout@v4
-        with:
-          repository: jonathanmejia4/SAF_FileSystem
-          token: ${{ secrets.SRC_PAT }}
-          ref: main
-          path: src
-          # Only the dirs the build needs. Also avoids a Windows-illegal path
-          # (trailing space in Enter_Robotics_Website/...) that breaks NTFS checkout.
-          sparse-checkout: |
-            enterjobs-runtime
-            enterjobs-desktop
-            job-search
-          sparse-checkout-cone-mode: true
+      # Manual clone (not actions/checkout) so we can disable core.protectNTFS — the repo
+      # contains a Windows-illegal path (trailing space in Enter_Robotics_Website/...) that
+      # aborts a normal Windows checkout even under sparse-checkout (Git validates every tree
+      # path before sparse skips it). protectNTFS=false stops that abort; cone sparse-checkout
+      # to the 3 build dirs keeps the bad dir out of the working tree (NTFS can't create it).
+      - name: Checkout private source (manual; protectNTFS off)
+        env:
+          SRC_PAT: ${{ secrets.SRC_PAT }}
+        run: |
+          git -c core.protectNTFS=false clone --no-checkout --depth 1 --filter=blob:none \
+            "https://x-access-token:${SRC_PAT}@github.com/jonathanmejia4/SAF_FileSystem.git" src
+          cd src
+          git sparse-checkout init --cone
+          git sparse-checkout set enterjobs-runtime enterjobs-desktop job-search
+          git -c core.protectNTFS=false checkout main
+          git remote set-url origin https://github.com/jonathanmejia4/SAF_FileSystem.git
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - uses: actions/setup-node@v4
