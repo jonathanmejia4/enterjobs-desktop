@@ -32,6 +32,13 @@ jobs:
           token: ${{ secrets.SRC_PAT }}
           ref: main
           path: src
+          # Only the dirs the build needs. Also avoids a Windows-illegal path
+          # (trailing space in Enter_Robotics_Website/...) that breaks NTFS checkout.
+          sparse-checkout: |
+            enterjobs-runtime
+            enterjobs-desktop
+            job-search
+          sparse-checkout-cone-mode: true
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - uses: actions/setup-node@v4
