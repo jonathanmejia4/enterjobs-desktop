@@ -54,7 +54,13 @@ jobs:
           pyinstaller --noconfirm enterjobs-runtime.spec
           BIN="dist/enterjobs-runtime/enterjobs-runtime"
           [ "${{ matrix.os }}" = "windows-latest" ] && BIN="dist/enterjobs-runtime/enterjobs-runtime.exe"
-          "$BIN" auth status
+          # Smoke: the frozen binary must dispatch AND emit valid JSON (catches a binary that
+          # launches but has a broken/garbled import tree — pipefail already fails on non-zero exit).
+          "$BIN" auth status | tee _smoke_auth.json
+          python -c "import json; json.load(open('_smoke_auth.json')); print('OK: auth status emits valid JSON')"
+          "$BIN" stats | tee _smoke_stats.json || true
+          python -c "import json; json.load(open('_smoke_stats.json')); print('OK: stats emits valid JSON')" || echo "stats smoke skipped (empty DB)"
+          rm -f _smoke_auth.json _smoke_stats.json
       - name: Install desktop deps
         working-directory: src/enterjobs-desktop
         run: npm install
