@@ -103,7 +103,6 @@ jobs:
           if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CERT_PROFILE" ]; then
             echo "::notice::Signing Windows build via Azure Trusted Signing (publisher: Jonathan Mejia, profile: $AZURE_CERT_PROFILE)"
             npx electron-builder --win ${{ steps.m.outputs.flag }} \
-              -c.win.azureSignOptions.publisherName="Jonathan Mejia" \
               -c.win.azureSignOptions.endpoint="https://eus.codesigning.azure.net/" \
               -c.win.azureSignOptions.codeSigningAccountName="enterjobs-signing" \
               -c.win.azureSignOptions.certificateProfileName="$AZURE_CERT_PROFILE"
