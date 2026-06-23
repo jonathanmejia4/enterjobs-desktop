@@ -136,12 +136,17 @@ jobs:
           APPLE_TEAM_ID: "${{ secrets.APPLE_TEAM_ID }}"
         run: |
           if [ -n "$CSC_LINK" ]; then
-            echo "::notice::Signing macOS build with Developer ID + notarizing (publisher: Jonathan Mejia)"
+            # TEMPORARY sign-only: notarize is OFF while Apple processes this brand-new Developer
+            # ID's FIRST notarization (stuck "In Progress" for hours — a one-time account warm-up).
+            # Signing still happens (no Gatekeeper "unidentified developer"; users get a one-time
+            # right-click→Open). Re-enable by removing `-c.mac.notarize=false` once a submission
+            # clears (xcrun notarytool history → Accepted). The APPLE_* env is kept ready for then.
+            echo "::notice::Signing macOS build with Developer ID (notarize OFF — Apple first-submission warm-up)"
             if [ -n "$APPLE_API_KEY_B64" ]; then
               echo "$APPLE_API_KEY_B64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
               export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
             fi
-            npx electron-builder --mac ${{ steps.m.outputs.flag }}
+            npx electron-builder --mac ${{ steps.m.outputs.flag }} -c.mac.notarize=false
           else
             echo "::warning::Apple signing secrets not set — building macOS UNSIGNED"
             CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac ${{ steps.m.outputs.flag }}
