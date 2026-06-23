@@ -72,11 +72,34 @@ jobs:
           else
             echo "flag=--publish never" >> "$GITHUB_OUTPUT"
           fi
-      - name: Build Windows (nsis, unsigned)
+      # Windows signing via Azure Trusted/Artifact Signing. Signs automatically once the three
+      # AZURE_* service-principal secrets AND the AZURE_CERT_PROFILE var are set on this repo;
+      # until then it falls back to an UNSIGNED build so releases keep shipping. Account+endpoint
+      # are fixed (Azure resource "enterjobs-signing", East US); publisher MUST match the validated
+      # individual identity CN ("Jonathan Mejia"). electron-builder v25 drives Trusted Signing
+      # natively from win.azureSignOptions + the AZURE_* env (no extra dlib/dotnet install needed
+      # on windows-latest).
+      - name: Build Windows (nsis; signed if Azure secrets present)
         if: matrix.os == 'windows-latest'
         working-directory: src/enterjobs-desktop
-        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
-        run: npx electron-builder --win ${{ steps.m.outputs.flag }}
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          AZURE_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+          AZURE_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+          AZURE_CLIENT_SECRET: "${{ secrets.AZURE_CLIENT_SECRET }}"
+          AZURE_CERT_PROFILE: "${{ vars.AZURE_CERT_PROFILE }}"
+        run: |
+          if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_CERT_PROFILE" ]; then
+            echo "::notice::Signing Windows build via Azure Trusted Signing (publisher: Jonathan Mejia, profile: $AZURE_CERT_PROFILE)"
+            npx electron-builder --win ${{ steps.m.outputs.flag }} \
+              -c.win.azureSignOptions.publisherName="Jonathan Mejia" \
+              -c.win.azureSignOptions.endpoint="https://eus.codesigning.azure.net/" \
+              -c.win.azureSignOptions.codeSigningAccountName="enterjobs-signing" \
+              -c.win.azureSignOptions.certificateProfileName="$AZURE_CERT_PROFILE"
+          else
+            echo "::warning::Azure signing secrets not set — building Windows UNSIGNED"
+            npx electron-builder --win ${{ steps.m.outputs.flag }}
+          fi
       - name: Build Linux (AppImage + deb)
         if: matrix.os == 'ubuntu-latest'
         working-directory: src/enterjobs-desktop
