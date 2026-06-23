@@ -105,7 +105,9 @@ jobs:
             npx electron-builder --win ${{ steps.m.outputs.flag }} \
               -c.win.azureSignOptions.endpoint="https://eus.codesigning.azure.net/" \
               -c.win.azureSignOptions.codeSigningAccountName="enterjobs-signing" \
-              -c.win.azureSignOptions.certificateProfileName="$AZURE_CERT_PROFILE"
+              -c.win.azureSignOptions.certificateProfileName="$AZURE_CERT_PROFILE" \
+              -c.win.azureSignOptions.TimestampRfc3161="http://timestamp.acs.microsoft.com" \
+              -c.win.azureSignOptions.TimestampDigest="SHA256"
           else
             echo "::warning::Azure signing secrets not set — building Windows UNSIGNED"
             npx electron-builder --win ${{ steps.m.outputs.flag }}
