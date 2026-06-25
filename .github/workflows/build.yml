@@ -172,7 +172,7 @@ jobs:
   verify-release:
     name: verify-release (atomic publish gate)
     needs: build
-    if: ${{ always() && (github.event_name == 'push' || inputs.publish == 'true') }}
+    if: ${{ always() && (github.event_name == 'push' || inputs.publish) }}
     runs-on: ubuntu-latest
     steps:
       - name: All 3 OS installers + update feeds must be present & version-consistent
