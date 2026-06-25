@@ -165,3 +165,39 @@ jobs:
             src/enterjobs-desktop/dist/*.dmg
             src/enterjobs-desktop/dist/*.zip
             src/enterjobs-desktop/dist/*.yml
+
+  # FB3 (FMEA #1, BLOCKER): atomic-release gate. Runs even if an OS leg failed (if: always()),
+  # so a PARTIAL publish (e.g. the v0.1.15 Windows failure that left "latest" without a .exe) FAILS
+  # the run loudly instead of silently advertising a version with a missing installer/feed.
+  verify-release:
+    name: verify-release (atomic publish gate)
+    needs: build
+    if: ${{ always() && (github.event_name == 'push' || inputs.publish == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: All 3 OS installers + update feeds must be present & version-consistent
+        run: |
+          set -uo pipefail
+          BASE="https://github.com/${{ github.repository }}/releases/latest/download"
+          INSTALLERS="EnterJobs-Setup.exe EnterJobs-arm64.dmg EnterJobs-x86_64.AppImage"
+          FEEDS="latest.yml latest-mac.yml latest-linux.yml"
+          for tries in 1 2 3 4 5 6; do
+            ok=1; vers=""
+            for f in $INSTALLERS; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" -IL "$BASE/$f")
+              [ "$code" = "200" ] || { echo "::warning::installer missing: $f (HTTP $code)"; ok=0; }
+            done
+            for y in $FEEDS; do
+              body=$(curl -fsSL "$BASE/$y" 2>/dev/null) || { echo "::warning::feed missing: $y"; ok=0; continue; }
+              v=$(printf '%s\n' "$body" | sed -n 's/^version: *//p' | head -1)
+              [ -n "$v" ] && vers="$vers $v"
+            done
+            uniq=$(printf '%s\n' $vers | tr ' ' '\n' | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
+            if [ "$ok" = "1" ] && [ "$uniq" = "1" ]; then
+              echo "::notice::atomic release OK — all 3 installers + 3 feeds present at $(printf '%s' $vers | awk '{print $1}')"
+              exit 0
+            fi
+            echo "attempt $tries/6: incomplete (ok=$ok distinct_versions=$uniq) — waiting for propagation"; sleep 20
+          done
+          echo "::error::PARTIAL/INCONSISTENT RELEASE — not all 3 installers + feeds resolved at one version. Do NOT announce 'latest' until fixed."
+          exit 1
