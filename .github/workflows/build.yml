@@ -102,13 +102,18 @@ jobs:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         run: |
           set -euo pipefail
+          # PortableGit ships bash.exe (MinGit does not). Self-extract, then REPACK as git.zip:
+          # electron-builder Azure-signs every loose .exe in extraResources (it choked on git-cmd.exe),
+          # but it never signs a .zip. main.js Expand-Archives git.zip on first run.
           url=$(curl -fsSL -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/git-for-windows/git/releases/latest | grep -oE 'https://[^"]+/PortableGit-[0-9.]+-64-bit\.7z\.exe' | head -1)
           echo "PortableGit: $url"
           curl -fsSL -o pgit.7z.exe "$url"
-          ./pgit.7z.exe -o git-win -y
-          rm -f pgit.7z.exe
-          test -f git-win/bin/bash.exe || { echo "::error::bundled bash missing after PortableGit extract"; exit 1; }
-          echo "bundled bash OK: git-win/bin/bash.exe"
+          ./pgit.7z.exe -o pg -y
+          test -f pg/bin/bash.exe || { echo "::error::PortableGit extract missing bin/bash.exe"; exit 1; }
+          powershell -NoProfile -NonInteractive -Command "Compress-Archive -Path 'pg/*' -DestinationPath 'git.zip' -Force"
+          rm -rf pg pgit.7z.exe
+          test -f git.zip || { echo "::error::git.zip not produced"; exit 1; }
+          echo "git.zip built ($(du -h git.zip | cut -f1))"
       - name: Build Windows (nsis; signed if Azure secrets present)
         if: matrix.os == 'windows-latest'
         working-directory: src/enterjobs-desktop
