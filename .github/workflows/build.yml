@@ -90,6 +90,25 @@ jobs:
       # individual identity CN ("Jonathan Mejia"). electron-builder v25 drives Trusted Signing
       # natively from win.azureSignOptions + the AZURE_* env (no extra dlib/dotnet install needed
       # on windows-latest).
+      # WB1b: bundle PortableGit (ships bash.exe) so the Claude Code engine has a shell on a clean
+      # Windows box. Runs BEFORE the Windows build so win.extraResources {from:"git-win"} can ship it
+      # at <resources>/git. (MinGit is git-core only — no bash — so we use PortableGit.) main.js resolves
+      # CLAUDE_CODE_GIT_BASH_PATH to <resources>\git\bin\bash.exe when no installed Git is found.
+      - name: Bundle PortableGit (bash for the Claude engine) [Windows]
+        if: matrix.os == 'windows-latest'
+        working-directory: src/enterjobs-desktop
+        shell: bash
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          set -euo pipefail
+          url=$(curl -fsSL -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/git-for-windows/git/releases/latest | grep -oE 'https://[^"]+/PortableGit-[0-9.]+-64-bit\.7z\.exe' | head -1)
+          echo "PortableGit: $url"
+          curl -fsSL -o pgit.7z.exe "$url"
+          ./pgit.7z.exe -o git-win -y
+          rm -f pgit.7z.exe
+          test -f git-win/bin/bash.exe || { echo "::error::bundled bash missing after PortableGit extract"; exit 1; }
+          echo "bundled bash OK: git-win/bin/bash.exe"
       - name: Build Windows (nsis; signed if Azure secrets present)
         if: matrix.os == 'windows-latest'
         working-directory: src/enterjobs-desktop
