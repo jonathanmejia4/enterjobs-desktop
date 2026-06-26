@@ -27,7 +27,10 @@ jobs:
       - name: Fetch the bundled Claude CLI
         working-directory: src/enterjobs-runtime
         shell: pwsh
-        run: pwsh -File ./fetch-claude-cli.ps1 -Channel stable
+        run: |
+          python -m pip install --upgrade pip
+          pip install claude-agent-sdk anyio
+          pwsh -File ./fetch-claude-cli.ps1 -Channel stable
 
       - name: Diagnose (Defender state + extraction + quarantine + spawn race)
         shell: pwsh
