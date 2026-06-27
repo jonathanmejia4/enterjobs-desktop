@@ -45,6 +45,10 @@ jobs:
         with: { python-version: "3.11" }
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
+      - name: AV-pattern lint gate (fail build on a new antivirus-trigger pattern)
+        working-directory: src
+        shell: bash
+        run: python enterjobs-desktop/scripts/av-lint.py
       - name: Freeze the runtime sidecar (PyInstaller)
         working-directory: src/enterjobs-runtime
         env:
