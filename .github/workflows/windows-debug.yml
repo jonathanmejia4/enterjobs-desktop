@@ -1,71 +1,53 @@
-# Windows debug — reproduce the apply-loop CLINotFoundError on a real windows-latest runner.
-# workflow_dispatch ONLY; never publishes; no interactive SSH. Tests the two live hypotheses:
-#   (A) Windows Defender quarantines the runtime-extracted claude.exe (file-absent / WinError 2)
-#   (B) a transient race makes the pinned absolute claude.exe momentarily absent at spawn
-name: Windows Debug (CLINotFoundError)
+# Windows Verify — automated proof of v0.1.26 install-time extraction on a REAL windows-latest runner.
+# Downloads the PUBLISHED installer, silent-installs it, and asserts claude.exe is present at the install
+# dir BEFORE any app launch (= install-time extraction worked → no runtime unzip on the click path → no
+# UI-thread freeze, no CLINotFoundError race). workflow_dispatch only; no SSH; never publishes.
+name: Windows Verify (install-time extraction)
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to verify (e.g. v0.1.26)"
+        default: "v0.1.26"
 
 jobs:
-  windows-diag:
-    name: windows-diag
+  verify:
+    name: windows-verify
     runs-on: windows-latest
     steps:
-      - name: Checkout private source (manual; protectNTFS off)
+      - name: Download the published installer
+        shell: pwsh
         env:
-          SRC_PAT: ${{ secrets.SRC_PAT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git -c core.protectNTFS=false clone --no-checkout --depth 1 --filter=blob:none \
-            "https://x-access-token:${SRC_PAT}@github.com/jonathanmejia4/SAF_FileSystem.git" src
-          cd src
-          git sparse-checkout init --cone
-          git sparse-checkout set enterjobs-runtime enterjobs-desktop job-search
-          git -c core.protectNTFS=false checkout main
-        shell: bash
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - name: Fetch the bundled Claude CLI
-        working-directory: src/enterjobs-runtime
+          gh release download "${{ inputs.version }}" -R jonathanmejia4/enterjobs-desktop -p "EnterJobs-Setup.exe" -D .
+          if (-not (Test-Path ".\EnterJobs-Setup.exe")) { Write-Host "FAIL: installer not downloaded"; exit 1 }
+          "downloaded: $((Get-Item .\EnterJobs-Setup.exe).Length) bytes"
+
+      - name: Silent install (NSIS /S)
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          pip install claude-agent-sdk anyio
-          pwsh -File ./fetch-claude-cli.ps1 -Channel stable
+          $p = Start-Process -FilePath ".\EnterJobs-Setup.exe" -ArgumentList "/S" -PassThru -Wait
+          "installer exit code: $($p.ExitCode)"
+          Start-Sleep -Seconds 12
 
-      - name: Diagnose (Defender state + extraction + quarantine + spawn race)
+      - name: Verify install-time extraction (NO app launch)
         shell: pwsh
-        working-directory: src
         run: |
-          $ErrorActionPreference = "Continue"
-          Write-Host "=================== DEFENDER STATE (AV hypothesis) ==================="
-          try { Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled,AntivirusEnabled,IsTamperProtected,AMRunningMode | Format-List } catch { Write-Host "Get-MpComputerStatus failed: $_" }
-          try { Get-MpPreference | Select-Object DisableRealtimeMonitoring,ExclusionPath | Format-List } catch {}
-
-          Write-Host "=================== LOCATE fetched claude artifact ==================="
-          $found = Get-ChildItem -Path . -Recurse -Filter "claude.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $found) { $found = Get-ChildItem -Path . -Recurse -Filter "claude.zip" -ErrorAction SilentlyContinue | Select-Object -First 1 }
-          Write-Host "source artifact: $($found.FullName)"
-
-          Write-Host "=================== EXTRACT to %APPDATA%\enterjobs-desktop\claude (like the app) ==================="
-          $roam = Join-Path $env:APPDATA "enterjobs-desktop\claude"
-          New-Item -ItemType Directory -Force -Path $roam | Out-Null
-          $cli = Join-Path $roam "claude.exe"
-          if ($found.Extension -eq ".zip") { Expand-Archive -Path $found.FullName -DestinationPath $roam -Force } else { Copy-Item $found.FullName $cli -Force }
-          Write-Host "present immediately after extract: $(Test-Path $cli)  size: $((Get-Item $cli -ErrorAction SilentlyContinue).Length)"
-
-          Write-Host "=================== WAIT 10s, re-check (Defender quarantine?) ==================="
-          Start-Sleep -Seconds 10
-          Write-Host "STILL present after 10s: $(Test-Path $cli)"
-          try { Get-MpThreatDetection | Format-List } catch {}
-          try { Get-MpThreat | Format-List } catch {}
-
-          Write-Host "=================== SPAWN RACE: 30 rapid spawns of the pinned path ==================="
-          $fail = 0
-          for ($i=0; $i -lt 30; $i++) {
-            try {
-              $p = Start-Process -FilePath $cli -ArgumentList "--version" -NoNewWindow -PassThru -Wait -ErrorAction Stop
-              if ($p.ExitCode -ne 0) { Write-Host "spawn $i nonzero exit $($p.ExitCode)" }
-            } catch { $fail++; Write-Host "spawn $i FAILED (file-absent/exec error): $_" }
-          }
-          Write-Host "RACE RESULT: $fail / 30 spawns failed.  present at end: $(Test-Path $cli)"
-          Write-Host "=================== DONE ==================="
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "EnterJobs.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { Write-Host "FAIL: EnterJobs.exe not found after install"; exit 1 }
+          $instDir = $exe.DirectoryName
+          "install dir: $instDir"
+          $cli = Join-Path $instDir "claude\claude.exe"
+          $present = Test-Path $cli
+          "claude.exe present at install dir (before any launch): $present"
+          if (-not $present) { Write-Host "FAIL: claude.exe was NOT extracted at install time (the fix did not work)"; exit 1 }
+          $size = (Get-Item $cli).Length
+          "claude.exe size: $size"
+          if ($size -lt 100000000) { Write-Host "FAIL: claude.exe too small ($size) — extraction incomplete"; exit 1 }
+          # marker present?
+          "marker present: $(Test-Path (Join-Path $instDir 'claude\claude.exe.extracted.ok'))"
+          # confirm the extracted binary actually runs
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: extracted claude.exe did not run"; exit 1 }
+          Write-Host "PASS: install-time extraction VERIFIED — claude.exe present + runnable at the install dir before any app launch."
