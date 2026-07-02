@@ -61,8 +61,8 @@ jobs:
           python -m pip install --upgrade pip pyinstaller
           pip install claude-agent-sdk anyio fastmcp patchright browserforge httpx pyyaml 'litellm[proxy]'
           # v0.1.21: DOCX/PDF export + JD parsing deps so collect_all() actually bundles them (the
-          # .spec collects yaml/bs4/docx/pdfplumber/pdfminer/fitz/pymupdf/pypdf — install them first).
-          pip install python-docx beautifulsoup4 pdfplumber pymupdf pdfminer.six pypdf
+          # .spec collects yaml/bs4/docx/pdfplumber/pdfminer/fitz/pymupdf/pypdf/PIL — install them first).
+          pip install python-docx beautifulsoup4 pdfplumber pymupdf pdfminer.six pypdf pillow
           pip install -r requirements-osint.txt || echo "osint deps partial — non-fatal"
           # Bundle the native Claude Code CLI into claude_agent_sdk/_bundled/ (the agent ENGINE for
           # every model — Claude, or OpenAI/Gemini/local via the LiteLLM proxy). Without it the app
