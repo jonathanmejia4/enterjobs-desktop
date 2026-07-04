@@ -63,6 +63,11 @@ jobs:
           # v0.1.21: DOCX/PDF export + JD parsing deps so collect_all() actually bundles them (the
           # .spec collects yaml/bs4/docx/pdfplumber/pdfminer/fitz/pymupdf/pypdf/PIL — install them first).
           pip install python-docx beautifulsoup4 pdfplumber pymupdf pdfminer.six pypdf pillow
+          # v0.1.42 (V42-STT): real local dictation — the spec collect_all()s faster_whisper/
+          # ctranslate2/tokenizers/onnxruntime and SKIPS gracefully if absent (mock fallback), so
+          # this install is what makes real STT actually ship. Non-fatal: a wheel failure on one
+          # OS leg degrades that leg to the mock engine instead of failing the build.
+          pip install faster-whisper || echo "faster-whisper install failed — STT ships as mock on this leg (non-fatal)"
           pip install -r requirements-osint.txt || echo "osint deps partial — non-fatal"
           # Bundle the native Claude Code CLI into claude_agent_sdk/_bundled/ (the agent ENGINE for
           # every model — Claude, or OpenAI/Gemini/local via the LiteLLM proxy). Without it the app
