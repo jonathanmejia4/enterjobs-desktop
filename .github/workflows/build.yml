@@ -63,6 +63,11 @@ jobs:
           # v0.1.21: DOCX/PDF export + JD parsing deps so collect_all() actually bundles them (the
           # .spec collects yaml/bs4/docx/pdfplumber/pdfminer/fitz/pymupdf/pypdf/PIL — install them first).
           pip install python-docx beautifulsoup4 pdfplumber pymupdf pdfminer.six pypdf pillow
+          # v0.1.43 (device-link): SPAKE2 PAKE pairing + AES-GCM sealing (device_link_crypto.py).
+          # spake2 pulls `cryptography` transitively. FATAL — deliberately NO `|| echo` fallback:
+          # device-link has no degraded mode (unlike STT's mock), so a silent install miss would
+          # ship the feature broken on this OS leg. Let the build fail loudly instead.
+          pip install spake2
           # v0.1.42 (V42-STT): real local dictation — the spec collect_all()s faster_whisper/
           # ctranslate2/tokenizers/onnxruntime and SKIPS gracefully if absent (mock fallback), so
           # this install is what makes real STT actually ship. Non-fatal: a wheel failure on one
@@ -87,6 +92,15 @@ jobs:
           python -c "import json; json.load(open('_smoke_auth.json')); print('OK: auth status emits valid JSON')"
           "$BIN" stats | tee _smoke_stats.json || true
           python -c "import json; json.load(open('_smoke_stats.json')); print('OK: stats emits valid JSON')" || echo "stats smoke skipped (empty DB)"
+          # v0.1.43 (device-link): the crypto stack must be importable in the FROZEN binary.
+          # `device-link transfer` with no args exits non-zero with its OWN usage error AFTER
+          # importing device_link_transfer -> device_link_crypto -> spake2/cryptography; any
+          # import error here means the stack was silently dropped from the bundle. FATAL.
+          DL_OUT=$("$BIN" device-link transfer 2>&1 || true)
+          if echo "$DL_OUT" | grep -qiE "ModuleNotFoundError|ImportError|No module named"; then
+            echo "FATAL: device-link stack missing from frozen binary:"; echo "$DL_OUT"; exit 1
+          fi
+          echo "OK: device-link dispatches without import errors"
           rm -f _smoke_auth.json _smoke_stats.json
       - name: Install desktop deps
         working-directory: src/enterjobs-desktop
