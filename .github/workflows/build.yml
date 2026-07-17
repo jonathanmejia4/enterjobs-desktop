@@ -239,9 +239,15 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         working-directory: src/enterjobs-desktop
         run: |
-          # productName=EnterJobs -> linux binary lowercased = enterjobs
-          BINARY="dist/linux-unpacked/enterjobs"
-          test -f "$BINARY" || { echo "::error::boot-smoke binary not found: $BINARY"; exit 1; }
+          # electron-builder derives the linux binary name from build.productName ("EnterJobs"); the
+          # exact case/sanitization varies, so DISCOVER the main executable rather than hardcode it
+          # (v0.1.52 gate fix — the hardcoded "enterjobs" name did not exist). Exclude the known helpers.
+          BINARY=$(find dist/linux-unpacked -maxdepth 1 -type f -perm -u+x \
+            ! -name '*.so' ! -name '*.so.*' ! -name 'chrome-sandbox' ! -name 'chrome_crashpad_handler' | head -1)
+          if [ -z "$BINARY" ] || [ ! -f "$BINARY" ]; then
+            echo "::error::boot-smoke binary not found in dist/linux-unpacked"; ls -la dist/linux-unpacked | head -40; exit 1
+          fi
+          echo "boot-smoke binary: $BINARY"
           chmod +x "$BINARY"
           CODE=0
           OUT=$(EJ_BOOT_SMOKE=1 timeout 90 xvfb-run -a "$BINARY" --no-sandbox 2>&1) || CODE=$?
@@ -332,7 +338,8 @@ jobs:
           fi
           chmod +x "$BINARY"
           CODE=0
-          OUT=$(EJ_BOOT_SMOKE=1 timeout 90 "$BINARY" --no-sandbox 2>&1) || CODE=$?
+          # macOS has no coreutils `timeout`; use a portable perl alarm+exec wrapper (v0.1.52 gate fix).
+          OUT=$(EJ_BOOT_SMOKE=1 perl -e 'alarm 90; exec @ARGV' "$BINARY" --no-sandbox 2>&1) || CODE=$?
           echo "=== boot-smoke output ===" ; echo "$OUT"
           if [ "$CODE" -ne 0 ]; then
             echo "::error::Boot smoke FAILED: exit $CODE"
