@@ -183,11 +183,78 @@ jobs:
             echo "::warning::Azure signing secrets not set — building Windows UNSIGNED"
             npx electron-builder --win ${{ steps.m.outputs.flag }}
           fi
+      # ── GATE: Windows ── (v0.1.51 MODULE_NOT_FOUND incident: lib/** not in build.files)
+      # Required gate — no continue-on-error. Runs AFTER packaging, BEFORE artifact upload.
+      - name: ASAR gate [Windows]
+        if: matrix.os == 'windows-latest'
+        working-directory: src/enterjobs-desktop
+        shell: bash
+        run: |
+          ASAR="dist/win-unpacked/resources/app.asar"
+          test -f "$ASAR" || { echo "::error::app.asar not found at $ASAR — check electron-builder output"; exit 1; }
+          node scripts/ci_asar_gate.js "$ASAR"
+      - name: Boot smoke [Windows]
+        if: matrix.os == 'windows-latest'
+        working-directory: src/enterjobs-desktop
+        shell: pwsh
+        run: |
+          $binary = "dist\win-unpacked\EnterJobs.exe"
+          if (-not (Test-Path $binary)) {
+            Write-Error "Boot-smoke binary not found: $binary"
+            exit 1
+          }
+          $env:EJ_BOOT_SMOKE = "1"
+          $proc = Start-Process -FilePath $binary -ArgumentList "--no-sandbox" `
+            -PassThru -Wait `
+            -RedirectStandardOutput "$env:RUNNER_TEMP\ej_smoke_out.txt" `
+            -RedirectStandardError "$env:RUNNER_TEMP\ej_smoke_err.txt"
+          $stdout = if (Test-Path "$env:RUNNER_TEMP\ej_smoke_out.txt") { Get-Content "$env:RUNNER_TEMP\ej_smoke_out.txt" -Raw } else { "" }
+          $stderr = if (Test-Path "$env:RUNNER_TEMP\ej_smoke_err.txt") { Get-Content "$env:RUNNER_TEMP\ej_smoke_err.txt" -Raw } else { "" }
+          Write-Host "=== boot-smoke stdout ===" ; Write-Host $stdout
+          Write-Host "=== boot-smoke stderr ===" ; Write-Host $stderr
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "Boot smoke FAILED: exit $($proc.ExitCode)"
+            exit 1
+          }
+          if (-not ($stdout -match "EJ_BOOT_SMOKE_OK")) {
+            Write-Error "Boot smoke FAILED: EJ_BOOT_SMOKE_OK not found in stdout"
+            exit 1
+          }
+          Write-Host "::notice::Boot smoke PASS [Windows]"
       - name: Build Linux (AppImage + deb)
         if: matrix.os == 'ubuntu-latest'
         working-directory: src/enterjobs-desktop
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: npx electron-builder --linux ${{ steps.m.outputs.flag }}
+      # ── GATE: Linux ── (v0.1.51 MODULE_NOT_FOUND incident: lib/** not in build.files)
+      # Required gate — no continue-on-error. Runs AFTER packaging, BEFORE artifact upload.
+      - name: ASAR gate [Linux]
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: src/enterjobs-desktop
+        run: |
+          ASAR="dist/linux-unpacked/resources/app.asar"
+          test -f "$ASAR" || { echo "::error::app.asar not found at $ASAR — check electron-builder output"; exit 1; }
+          node scripts/ci_asar_gate.js "$ASAR"
+      - name: Boot smoke [Linux]
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: src/enterjobs-desktop
+        run: |
+          # productName=EnterJobs -> linux binary lowercased = enterjobs
+          BINARY="dist/linux-unpacked/enterjobs"
+          test -f "$BINARY" || { echo "::error::boot-smoke binary not found: $BINARY"; exit 1; }
+          chmod +x "$BINARY"
+          CODE=0
+          OUT=$(EJ_BOOT_SMOKE=1 timeout 90 xvfb-run -a "$BINARY" --no-sandbox 2>&1) || CODE=$?
+          echo "=== boot-smoke output ===" ; echo "$OUT"
+          if [ "$CODE" -ne 0 ]; then
+            echo "::error::Boot smoke FAILED: exit $CODE"
+            exit 1
+          fi
+          if ! echo "$OUT" | grep -q "EJ_BOOT_SMOKE_OK"; then
+            echo "::error::Boot smoke FAILED: EJ_BOOT_SMOKE_OK not found in output"
+            exit 1
+          fi
+          echo "::notice::Boot smoke PASS [Linux]"
       # macOS signing via Apple Developer ID + notarization. Signs automatically once CSC_LINK
       # (base64 of the Developer ID Application .p12) + CSC_KEY_PASSWORD are set. Notarization
       # (electron-builder v25, hardenedRuntime already on) uses EITHER an App Store Connect API
@@ -224,6 +291,58 @@ jobs:
             echo "::warning::Apple signing secrets not set — building macOS UNSIGNED"
             CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac ${{ steps.m.outputs.flag }}
           fi
+      # ── GATE: macOS ── (v0.1.51 MODULE_NOT_FOUND incident: lib/** not in build.files)
+      # Required gate — no continue-on-error. Runs AFTER packaging, BEFORE artifact upload.
+      # electron-builder produces dist/mac/ (x64) and/or dist/mac-arm64/ (arm64) depending on arch.
+      # The gate checks all present arch dirs; at least one must exist.
+      - name: ASAR gate [macOS]
+        if: matrix.os == 'macos-latest'
+        working-directory: src/enterjobs-desktop
+        run: |
+          checked=0
+          for app_dir in dist/mac dist/mac-arm64 dist/mac-universal; do
+            ASAR="$app_dir/EnterJobs.app/Contents/Resources/app.asar"
+            if [ -f "$ASAR" ]; then
+              echo "Checking: $ASAR"
+              node scripts/ci_asar_gate.js "$ASAR"
+              checked=$((checked+1))
+            fi
+          done
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::No app.asar found under dist/mac*/EnterJobs.app/Contents/Resources/ — check electron-builder output"
+            exit 1
+          fi
+          echo "::notice::ASAR gate PASS [macOS] — checked $checked arch(es)"
+      - name: Boot smoke [macOS]
+        if: matrix.os == 'macos-latest'
+        working-directory: src/enterjobs-desktop
+        run: |
+          # Find the first available arch binary (x64 first, then arm64)
+          BINARY=""
+          for app_dir in dist/mac dist/mac-arm64; do
+            CANDIDATE="$app_dir/EnterJobs.app/Contents/MacOS/EnterJobs"
+            if [ -f "$CANDIDATE" ]; then
+              BINARY="$CANDIDATE"
+              break
+            fi
+          done
+          if [ -z "$BINARY" ]; then
+            echo "::error::boot-smoke binary not found in dist/mac*/EnterJobs.app/Contents/MacOS/EnterJobs"
+            exit 1
+          fi
+          chmod +x "$BINARY"
+          CODE=0
+          OUT=$(EJ_BOOT_SMOKE=1 timeout 90 "$BINARY" --no-sandbox 2>&1) || CODE=$?
+          echo "=== boot-smoke output ===" ; echo "$OUT"
+          if [ "$CODE" -ne 0 ]; then
+            echo "::error::Boot smoke FAILED: exit $CODE"
+            exit 1
+          fi
+          if ! echo "$OUT" | grep -q "EJ_BOOT_SMOKE_OK"; then
+            echo "::error::Boot smoke FAILED: EJ_BOOT_SMOKE_OK not found in output"
+            exit 1
+          fi
+          echo "::notice::Boot smoke PASS [macOS]"
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
