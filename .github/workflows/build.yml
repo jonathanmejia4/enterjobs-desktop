@@ -53,6 +53,9 @@ jobs:
         working-directory: src/enterjobs-runtime
         env:
           EJ_REQUIRE_BUNDLED_CLI: "1"   # spec hard-fails if the bundled Claude CLI is missing
+          # R4-ATS-MOVEBACK (v0.1.65): turn the spec's Tier-4 silent-miss WARNs into hard
+          # build failures (missing pip install / unpopulated EMSI JSONs abort the freeze).
+          EJ_REQUIRE_TIER4: "1"
           # v0.1.21: Chromium is not yet bundled in the frozen sidecar (a follow-up). The runtime
           # fast-fails cleanly when chromium is absent (no 600s hang), so skip the spec's hard guard
           # here to let the build proceed. Remove this once `patchright install chromium` is bundled.
@@ -68,6 +71,20 @@ jobs:
           # device-link has no degraded mode (unlike STT's mock), so a silent install miss would
           # ship the feature broken on this OS leg. Let the build fail loudly instead.
           pip install spake2
+          # R4-ATS-MOVEBACK (v0.1.65): Tier-4 ATS enrichment (SkillNer) now runs LOCALLY in the
+          # frozen sidecar — the server /api/ats/enrich offload is retired. FATAL installs, no
+          # `|| echo` (v0.1.43 rule: a feature dep with no degraded mode must fail the build, not
+          # silently ship Tier-4 degraded to Tiers 1-2). nltk ships for its corpus-free
+          # PorterStemmer ONLY — do NOT add a corpora download; the spec filters hook-nltk's
+          # wholesale ~/nltk_data copy regardless. ipython: skillNer hard-imports IPython.display.
+          # en_core_web_sm is NOT on PyPI — direct wheel URL, pinned to the spacy 3.8 line.
+          pip install 'spacy>=3.8,<3.9' 'skillNer>=1.0.3' nltk ipython
+          pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+          # Populate skillNer's two gitignored EMSI JSONs where the spec bundles them from
+          # (job-search/resume-builder/). skillNer fetch-and-caches into CWD; needs network.
+          ( cd ../job-search/resume-builder && python -c "from skillNer.general_params import SKILL_DB; print('EMSI SKILL_DB rows:', len(SKILL_DB))" )
+          test -f ../job-search/resume-builder/skill_db_relax_20.json
+          test -f ../job-search/resume-builder/token_dist.json
           # v0.1.42 (V42-STT): real local dictation — the spec collect_all()s faster_whisper/
           # ctranslate2/tokenizers/onnxruntime and SKIPS gracefully if absent (mock fallback), so
           # this install is what makes real STT actually ship. Non-fatal: a wheel failure on one
@@ -101,6 +118,19 @@ jobs:
             echo "FATAL: device-link stack missing from frozen binary:"; echo "$DL_OUT"; exit 1
           fi
           echo "OK: device-link dispatches without import errors"
+          # R4-ATS-MOVEBACK (v0.1.65): Tier-4 must ACTUALLY work in the BUILT artifact — DB
+          # resolved from sys._MEIPASS (never CWD/network), extractor loads, a known term
+          # annotates, and NOTHING is written into the CWD. FATAL — a WARN-only smoke here
+          # would reopen the silenced-miss trap one layer out.
+          T4BIN="$PWD/$BIN"
+          mkdir -p _t4_empty_cwd
+          ( cd _t4_empty_cwd && "$T4BIN" py -c 'import time; t0=time.time(); import ats_keywords as ak; ext=ak._get_skill_extractor(); print("T4_DB_SOURCE="+str(getattr(ak,"_SKILLNER_DB_SOURCE",None))); print("T4_NON_NONE="+str(ext is not None)); ann=ext.annotate("Experienced with SolidWorks and AutoCAD for mechanical design"); res=ann.get("results",{}); names=" ".join(str(m) for m in (res.get("full_matches",[])+res.get("ngram_scored",[]))).lower(); print("T4_SOLIDWORKS="+str("solidworks" in names)); print("T4_LOAD_S=%.2f"%(time.time()-t0))' ) | tee _smoke_t4.txt
+          grep -q "T4_DB_SOURCE=frozen(_MEIPASS)" _smoke_t4.txt
+          grep -q "T4_NON_NONE=True" _smoke_t4.txt
+          grep -q "T4_SOLIDWORKS=True" _smoke_t4.txt
+          if [ -n "$(ls -A _t4_empty_cwd)" ]; then echo "FATAL: Tier-4 smoke wrote into CWD (redirect regressed):"; ls -la _t4_empty_cwd; exit 1; fi
+          echo "OK: frozen Tier-4 smoke — _MEIPASS DB, extractor live, no CWD writes"
+          rm -rf _t4_empty_cwd _smoke_t4.txt
           rm -f _smoke_auth.json _smoke_stats.json
       - name: Install desktop deps
         working-directory: src/enterjobs-desktop
