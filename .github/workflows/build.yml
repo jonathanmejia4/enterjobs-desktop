@@ -124,7 +124,7 @@ jobs:
           # would reopen the silenced-miss trap one layer out.
           T4BIN="$PWD/$BIN"
           mkdir -p _t4_empty_cwd
-          ( cd _t4_empty_cwd && "$T4BIN" py -c 'import time; t0=time.time(); import ats_keywords as ak; ext=ak._get_skill_extractor(); print("T4_DB_SOURCE="+str(getattr(ak,"_SKILLNER_DB_SOURCE",None))); print("T4_NON_NONE="+str(ext is not None)); ann=ext.annotate("Experienced with SolidWorks and AutoCAD for mechanical design"); res=ann.get("results",{}); names=" ".join(str(m) for m in (res.get("full_matches",[])+res.get("ngram_scored",[]))).lower(); print("T4_SOLIDWORKS="+str("solidworks" in names)); print("T4_LOAD_S=%.2f"%(time.time()-t0))' ) | tee _smoke_t4.txt
+          ( cd _t4_empty_cwd && "$T4BIN" py -c 'import time; t0=time.time(); import ats_keywords as ak; e=ak._get_skill_extractor(); se=e[0] if isinstance(e,tuple) else e; print("T4_DB_SOURCE="+str(getattr(ak,"_SKILLNER_DB_SOURCE",None))); print("T4_NON_NONE="+str(se is not None)); ann=se.annotate("Experienced with SolidWorks and AutoCAD for mechanical design"); res=ann.get("results",{}); names=" ".join(str(m) for m in (res.get("full_matches",[])+res.get("ngram_scored",[]))).lower(); print("T4_SOLIDWORKS="+str("solidworks" in names)); print("T4_LOAD_S=%.2f"%(time.time()-t0))' ) | tee _smoke_t4.txt
           grep -q "T4_DB_SOURCE=frozen(_MEIPASS)" _smoke_t4.txt
           grep -q "T4_NON_NONE=True" _smoke_t4.txt
           grep -q "T4_SOLIDWORKS=True" _smoke_t4.txt
