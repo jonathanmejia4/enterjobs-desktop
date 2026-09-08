@@ -78,7 +78,10 @@ jobs:
           # PorterStemmer ONLY — do NOT add a corpora download; the spec filters hook-nltk's
           # wholesale ~/nltk_data copy regardless. ipython: skillNer hard-imports IPython.display.
           # en_core_web_sm is NOT on PyPI — direct wheel URL, pinned to the spacy 3.8 line.
-          pip install 'spacy>=3.8,<3.9' 'skillNer>=1.0.3' nltk ipython
+          # R4-JUDGE-66:JT-4 (v0.1.66): `anthropic` is fit_judge._byok_transport's function-local
+          # import — never in the static graph; its absence from the shipped PYZ was the field's
+          # judge_error_dominant=import_missing root cause. FATAL like its Tier-4 siblings.
+          pip install 'spacy>=3.8,<3.9' 'skillNer>=1.0.3' nltk ipython anthropic
           pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
           # Populate skillNer's two gitignored EMSI JSONs where the spec bundles them from
           # (job-search/resume-builder/). skillNer fetch-and-caches into CWD; needs network.
