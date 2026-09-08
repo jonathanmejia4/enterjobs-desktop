@@ -23,7 +23,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        # macos pinned to macos-15: the macos-26 rolling image (20260831.0337.3, macOS 26.6.2)
+        # broke electron-builder's temp-keychain unlock (SecKeychainUnlock passphrase error)
+        # twice on 2026-09-08; the 20260728 image (26.5.2) was green on 09-02. Revisit the pin
+        # when the image regression is fixed upstream.
+        os: [windows-latest, ubuntu-latest, macos-15]
     steps:
       # Manual clone (not actions/checkout) so we can disable core.protectNTFS — the repo
       # contains a Windows-illegal path (trailing space in Enter_Robotics_Website/...) that
@@ -299,7 +303,7 @@ jobs:
       # OR an Apple ID + app-specific password (APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID).
       # Until those secrets exist it builds UNSIGNED — identical to before, never breaks the pipeline.
       - name: Build macOS (dmg + zip; signed+notarized if Apple secrets present)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-15'
         working-directory: src/enterjobs-desktop
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
@@ -333,7 +337,7 @@ jobs:
       # electron-builder produces dist/mac/ (x64) and/or dist/mac-arm64/ (arm64) depending on arch.
       # The gate checks all present arch dirs; at least one must exist.
       - name: ASAR gate [macOS]
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-15'
         working-directory: src/enterjobs-desktop
         run: |
           checked=0
@@ -351,7 +355,7 @@ jobs:
           fi
           echo "::notice::ASAR gate PASS [macOS] — checked $checked arch(es)"
       - name: Boot smoke [macOS]
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-15'
         working-directory: src/enterjobs-desktop
         run: |
           # Find the first available arch binary (x64 first, then arm64)
