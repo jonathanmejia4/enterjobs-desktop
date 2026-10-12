@@ -42,7 +42,14 @@ jobs:
             "https://x-access-token:${SRC_PAT}@github.com/jonathanmejia4/SAF_FileSystem.git" src
           cd src
           git sparse-checkout init --cone
-          git sparse-checkout set enterjobs-runtime enterjobs-desktop job-search
+          # .claude/agents: the 4 critic/rewriter rubric .md files the PyInstaller spec bundles
+          # into _internal/.claude/agents (subagents.py reads them verbatim; without them the
+          # resume bullet-rewriter ships without its anti-hallucination rails). The spec warns-
+          # and-continues when they're absent — EJ_REQUIRE_AGENTS=1 on the freeze step turns
+          # that into a hard abort so a sparse-checkout regression can never ship silently again.
+          # (.claude top-level + agents filenames verified NTFS-legal; the Windows-illegal path
+          # lives under Enter_Robotics_Website/, still excluded by cone sparse.)
+          git sparse-checkout set enterjobs-runtime enterjobs-desktop job-search .claude/agents
           git -c core.protectNTFS=false checkout main
           git remote set-url origin https://github.com/jonathanmejia4/SAF_FileSystem.git
       - uses: actions/setup-python@v5
@@ -57,6 +64,11 @@ jobs:
         working-directory: src/enterjobs-runtime
         env:
           EJ_REQUIRE_BUNDLED_CLI: "1"   # spec hard-fails if the bundled Claude CLI is missing
+          # v0.1.71 Gate-C finding: the sparse checkout above omitted .claude/agents, so every
+          # prior CI freeze silently shipped WITHOUT the 4 agent rubric .md files (spec warns and
+          # falls back). Now that the checkout includes them, make their absence a hard build
+          # failure — the spec's designed kill switch for exactly this regression class.
+          EJ_REQUIRE_AGENTS: "1"
           # R4-ATS-MOVEBACK (v0.1.65): turn the spec's Tier-4 silent-miss WARNs into hard
           # build failures (missing pip install / unpopulated EMSI JSONs abort the freeze).
           EJ_REQUIRE_TIER4: "1"
