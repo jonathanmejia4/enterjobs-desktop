@@ -149,8 +149,9 @@ jobs:
           ls dist/enterjobs-runtime/_internal | grep -E '^fastmcp(_slim)?-4\.0\.5\.dist-info$' \
             || { echo "FATAL: bundled fastmcp is not the pinned 4.0.5:"; ls dist/enterjobs-runtime/_internal | grep -i fastmcp; exit 1; }
           echo "OK: bundled fastmcp dist-info is 4.0.5"
+          # perl-alarm instead of `timeout`: macos-15 runners ship no GNU coreutils timeout
           printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci-mcp-gate","version":"0"}}}\n' \
-            | timeout 240 "$BIN" mcp > _mcp_handshake.out 2> _mcp_handshake.err || true
+            | perl -e 'alarm 300; exec @ARGV' "$BIN" mcp > _mcp_handshake.out 2> _mcp_handshake.err || true
           if ! grep -q '"serverInfo"' _mcp_handshake.out; then
             echo "FATAL: frozen stealth-browser MCP did not answer the initialize handshake"
             echo "--- stdout ---"; head -c 2000 _mcp_handshake.out
