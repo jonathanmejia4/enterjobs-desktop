@@ -78,7 +78,15 @@ jobs:
           EJ_SKIP_BROWSERS_PATH_CHECK: "1"
         run: |
           python -m pip install --upgrade pip pyinstaller
-          pip install claude-agent-sdk anyio fastmcp patchright browserforge httpx pyyaml 'litellm[proxy]'
+          # fastmcp PINNED ==4.0.5 (v0.1.72 fix): the unpinned install froze fastmcp 4.1.0
+          # into v0.1.71 — 4.1.x REMOVED the deprecated `exclude_args` kwarg that
+          # stealth_browser.py's @mcp.tool() decorators pass, so the frozen MCP TypeErrors
+          # at boot and every field client saw CONNECTION_CLOSED (apply loop dead in the
+          # packaged app). 4.0.5 is the exact field-proven v0.1.70 pair; 2.14.x is NOT safe
+          # frozen (docket's dynamic lupa.lua51 import is missed by PyInstaller). Do not
+          # unpin until stealth_browser.py migrates off exclude_args AND the MCP handshake
+          # gate below is green on all 3 legs.
+          pip install claude-agent-sdk anyio 'fastmcp==4.0.5' patchright browserforge httpx pyyaml 'litellm[proxy]'
           # v0.1.21: DOCX/PDF export + JD parsing deps so collect_all() actually bundles them (the
           # .spec collects yaml/bs4/docx/pdfplumber/pdfminer/fitz/pymupdf/pypdf/PIL — install them first).
           pip install python-docx beautifulsoup4 pdfplumber pymupdf pdfminer.six pypdf pillow
@@ -128,6 +136,26 @@ jobs:
           python -c "import json; json.load(open('_smoke_auth.json')); print('OK: auth status emits valid JSON')"
           "$BIN" stats | tee _smoke_stats.json || true
           python -c "import json; json.load(open('_smoke_stats.json')); print('OK: stats emits valid JSON')" || echo "stats smoke skipped (empty DB)"
+          # v0.1.72 MCP gates — the two guards for the fastmcp CONNECTION_CLOSED regression:
+          # (1) the bundled fastmcp dist-info must be exactly the pinned 4.0.5 (4.1.x removed
+          #     exclude_args -> boot TypeError; that broken-at-rest server is what v0.1.71
+          #     shipped), and
+          # (2) a REAL stdio handshake against the frozen binary's own MCP mode
+          #     (`enterjobs-runtime mcp`, sidecar_entry.py) must answer `initialize` with
+          #     serverInfo. Boot smoke never exercises this path — this is the gate that
+          #     would have caught v0.1.71 before publish. Both FATAL.
+          ls dist/enterjobs-runtime/_internal | grep -E '^fastmcp-4\.0\.5\.dist-info$' \
+            || { echo "FATAL: bundled fastmcp is not the pinned 4.0.5:"; ls dist/enterjobs-runtime/_internal | grep -i fastmcp; exit 1; }
+          echo "OK: bundled fastmcp dist-info is 4.0.5"
+          printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci-mcp-gate","version":"0"}}}\n' \
+            | timeout 240 "$BIN" mcp > _mcp_handshake.out 2> _mcp_handshake.err || true
+          if ! grep -q '"serverInfo"' _mcp_handshake.out; then
+            echo "FATAL: frozen stealth-browser MCP did not answer the initialize handshake"
+            echo "--- stdout ---"; head -c 2000 _mcp_handshake.out
+            echo "--- stderr (tail) ---"; tail -c 3000 _mcp_handshake.err
+            exit 1
+          fi
+          echo "OK: frozen MCP answered the initialize handshake (serverInfo present)"
           # v0.1.43 (device-link): the crypto stack must be importable in the FROZEN binary.
           # `device-link transfer` with no args exits non-zero with its OWN usage error AFTER
           # importing device_link_transfer -> device_link_crypto -> spake2/cryptography; any
