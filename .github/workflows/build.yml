@@ -144,7 +144,9 @@ jobs:
           #     (`enterjobs-runtime mcp`, sidecar_entry.py) must answer `initialize` with
           #     serverInfo. Boot smoke never exercises this path — this is the gate that
           #     would have caught v0.1.71 before publish. Both FATAL.
-          ls dist/enterjobs-runtime/_internal | grep -E '^fastmcp-4\.0\.5\.dist-info$' \
+          # (PyInstaller carries the slim package's dist-info; the meta-package's may or may
+          # not also land — accept either spelling, version is what matters.)
+          ls dist/enterjobs-runtime/_internal | grep -E '^fastmcp(_slim)?-4\.0\.5\.dist-info$' \
             || { echo "FATAL: bundled fastmcp is not the pinned 4.0.5:"; ls dist/enterjobs-runtime/_internal | grep -i fastmcp; exit 1; }
           echo "OK: bundled fastmcp dist-info is 4.0.5"
           printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci-mcp-gate","version":"0"}}}\n' \
