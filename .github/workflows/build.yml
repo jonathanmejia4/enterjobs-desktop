@@ -9,10 +9,20 @@ on:
         description: "Publish to this repo's Releases"
         type: boolean
         default: true
+      src_ref:
+        description: "SAF_FileSystem ref to build (branch or tag). Non-main refs can NEVER publish (interlock in Decide publish)."
+        type: string
+        default: main
   push:
     tags: ["v*"]
 permissions:
   contents: write
+# V0177 §16 round-9 source-ref discipline: every `run:` script reads these from env, never inline `${{ inputs.* }}`
+# (script-injection guard). Tag pushes have no inputs, so SRC_REF falls back to main.
+env:
+  SRC_REF: ${{ inputs.src_ref || 'main' }}
+  EJ_EVENT_NAME: ${{ github.event_name }}
+  EJ_PUBLISH_INPUT: ${{ inputs.publish }}
 defaults:
   run:
     shell: bash
@@ -39,6 +49,7 @@ jobs:
           SRC_PAT: ${{ secrets.SRC_PAT }}
         run: |
           git -c core.protectNTFS=false clone --no-checkout --depth 1 --filter=blob:none \
+            --branch "$SRC_REF" \
             "https://x-access-token:${SRC_PAT}@github.com/jonathanmejia4/SAF_FileSystem.git" src
           cd src
           git sparse-checkout init --cone
@@ -49,8 +60,12 @@ jobs:
           # that into a hard abort so a sparse-checkout regression can never ship silently again.
           # (.claude top-level + agents filenames verified NTFS-legal; the Windows-illegal path
           # lives under Enter_Robotics_Website/, still excluded by cone sparse.)
-          git sparse-checkout set enterjobs-runtime enterjobs-desktop job-search .claude/agents
-          git -c core.protectNTFS=false checkout main
+          # V0177 §16 (coordinator pre-RO-6 action): + scripts (lint_no_private_keys for Gate C) + .claude/specs
+          # (Gate C's spec-pinned inputs). Both paths verified NTFS-legal.
+          git sparse-checkout set enterjobs-runtime enterjobs-desktop job-search .claude/agents scripts .claude/specs
+          git -c core.protectNTFS=false checkout "$SRC_REF"
+          echo "SRC_REF=$SRC_REF"
+          git rev-parse HEAD
           git remote set-url origin https://github.com/jonathanmejia4/SAF_FileSystem.git
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
@@ -188,11 +203,20 @@ jobs:
       - name: Decide publish
         id: m
         run: |
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then
-            echo "flag=--publish always" >> "$GITHUB_OUTPUT"
-          else
-            echo "flag=--publish never" >> "$GITHUB_OUTPUT"
+          # V0177 §16 round-9 structural publish interlock (L1-b): a non-main source ref can never publish,
+          # whatever the input or trigger says. Shell variables only (L1-a/L1-d): the expanded
+          # EJ_PUBLISH=... SRC_REF=... line exists in the log only when this branch executed.
+          if [ "$SRC_REF" != "main" ] && { [ "$EJ_EVENT_NAME" = "push" ] || [ "$EJ_PUBLISH_INPUT" = "true" ]; }; then
+            echo "::error::publish interlock: SRC_REF=$SRC_REF is not main; refusing to publish a non-main tree (event=$EJ_EVENT_NAME publish=$EJ_PUBLISH_INPUT)"
+            exit 1
           fi
+          if [ "$EJ_EVENT_NAME" = "push" ] || [ "$EJ_PUBLISH_INPUT" = "true" ]; then
+            flag="--publish always"
+          else
+            flag="--publish never"
+          fi
+          echo "flag=$flag" >> "$GITHUB_OUTPUT"
+          echo "EJ_PUBLISH=$flag SRC_REF=$SRC_REF"
       # Windows signing via Azure Trusted/Artifact Signing. Signs automatically once the three
       # AZURE_* service-principal secrets AND the AZURE_CERT_PROFILE var are set on this repo;
       # until then it falls back to an UNSIGNED build so releases keep shipping. Account+endpoint
@@ -447,7 +471,7 @@ jobs:
   verify-release:
     name: verify-release (atomic publish gate)
     needs: build
-    if: ${{ always() && (github.event_name == 'push' || inputs.publish) }}
+    if: ${{ always() && (github.event_name == 'push' || inputs.publish) && (inputs.src_ref || 'main') == 'main' }}
     runs-on: ubuntu-latest
     steps:
       - name: All 3 OS installers + update feeds must be present & version-consistent
